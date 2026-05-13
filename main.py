@@ -4,18 +4,20 @@ import PIL.Image
 from fastapi import FastAPI, UploadFile, File, Request, Body
 from fastapi.responses import HTMLResponse
 import google.generativeai as genai
-from typing import List
 
 app = FastAPI()
 
-# Configuração da IA
+# Configuração IA
 api_key = os.environ.get("GOOGLE_API_KEY")
 if api_key:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel('gemini-1.5-flash')
 
-# Banco de dados em memória para a demonstração
-proposals = []
+# Banco de dados simulado em memória
+proposals = [
+    {"exame": "Hemograma Completo", "valor": "85.00", "data": "15/05 09:00"},
+    {"exame": "Vitamina D", "valor": "120.00", "data": "15/05 10:30"}
+]
 
 @app.get("/", response_class=HTMLResponse)
 async def home():
@@ -23,94 +25,75 @@ async def home():
     <!DOCTYPE html>
     <html lang="pt-br">
     <head>
-        <meta charset="UTF-8">
         <script src="https://cdn.tailwindcss.com"></script>
-        <title>CheckApp Pro</title>
+        <title>CheckApp | Pitch</title>
         <style>
-            .gradient-bg { background: linear-gradient(135deg, #0f172a 0%, #312e81 100%); }
-            .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+            .grad { background: linear-gradient(135deg, #0f172a 0%, #312e81 100%); }
         </style>
     </head>
-    <body class="bg-slate-100 min-h-screen">
-        <nav class="gradient-bg p-6 text-white shadow-lg">
-            <div class="max-w-5xl mx-auto flex justify-between items-center">
-                <h1 class="text-3xl font-black italic">Check<span class="text-pink-400">App</span></h1>
-                <div class="space-x-4">
-                    <button onclick="tab('paciente')" class="px-4 py-2 font-bold hover:bg-white/10 rounded">Paciente</button>
-                    <button onclick="tab('lab')" class="px-4 py-2 font-bold hover:bg-white/10 rounded">Laboratório</button>
-                </div>
+    <body class="bg-gray-50">
+        <nav class="grad p-6 text-white flex justify-between items-center shadow-lg">
+            <h1 class="text-3xl font-black italic">Check<span class="text-pink-400">App</span></h1>
+            <div class="space-x-4">
+                <button onclick="tab('paciente')" class="px-4 py-2 font-bold hover:bg-white/10 rounded">Paciente</button>
+                <button onclick="tab('lab')" class="px-4 py-2 font-bold hover:bg-white/10 rounded">Laboratório</button>
             </div>
         </nav>
 
         <main class="max-w-5xl mx-auto p-6">
-            <div id="view-paciente" class="glass p-8 rounded-3xl shadow-xl">
-                <h2 class="text-2xl font-bold text-slate-800 mb-6">Solicitar Exames</h2>
-                <div class="grid md:grid-cols-2 gap-6">
-                    <input id="cep" type="text" placeholder="CEP" class="p-4 border rounded-xl w-full">
-                    <select id="exam-select" class="p-4 border rounded-xl w-full">
+            <div id="paciente" class="bg-white p-8 rounded-3xl shadow-xl">
+                <h2 class="text-2xl font-bold mb-6 text-slate-800">Encontrar Exames no meu CEP</h2>
+                <div class="grid md:grid-cols-3 gap-4 mb-6">
+                    <input id="cep" type="text" placeholder="CEP" class="p-4 border rounded-xl">
+                    <select id="exame" class="p-4 border rounded-xl">
                         <option>Hemograma Completo</option><option>Vitamina D</option>
-                        <option>Ultrassom de Abdômen</option><option>Ressonância</option>
+                        <option>Ultrassom</option><option>Tomografia</option>
                     </select>
+                    <button onclick="buscar()" class="bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700">BUSCAR</button>
                 </div>
-                <div class="mt-6 border-2 border-dashed border-slate-300 p-8 text-center rounded-2xl">
+                
+                <div class="border-2 border-dashed p-6 text-center rounded-2xl mb-6">
                     <input type="file" id="upload" class="mb-4">
-                    <button onclick="analyze()" class="bg-indigo-600 text-white px-8 py-3 rounded-xl font-bold">ANALISAR PEDIDO</button>
+                    <button onclick="analyze()" class="bg-emerald-600 text-white px-8 py-3 rounded-xl font-bold">ANALISAR RECEITA COM IA</button>
                 </div>
-                <div id="res-paciente" class="mt-6 p-4 bg-emerald-50 rounded-lg hidden text-emerald-800 font-bold"></div>
+                <div id="res" class="p-4 bg-emerald-50 text-emerald-800 font-bold rounded-lg hidden"></div>
             </div>
 
-            <div id="view-lab" class="hidden glass p-8 rounded-3xl shadow-xl">
-                <h2 class="text-2xl font-bold text-slate-800 mb-6">Cadastro de Proposta</h2>
-                <div class="grid md:grid-cols-2 gap-4">
-                    <select id="lab-exam" class="p-4 border rounded-lg">
-                        <option>Hemograma Completo</option><option>Vitamina D</option>
-                        <option>Ultrassom de Abdômen</option><option>Ressonância</option>
-                    </select>
-                    <input id="lab-price" type="number" placeholder="Valor (R$)" class="p-4 border rounded-lg">
-                    <input id="lab-date" type="date" class="p-4 border rounded-lg">
-                    <input id="lab-time" type="time" class="p-4 border rounded-lg">
+            <div id="lab" class="hidden bg-white p-8 rounded-3xl shadow-xl">
+                <h2 class="text-2xl font-bold mb-6">Propostas B2B</h2>
+                <div class="grid grid-cols-2 gap-4 mb-8">
+                    <input id="l-exame" class="p-4 border rounded" placeholder="Exame">
+                    <input id="l-valor" type="number" class="p-4 border rounded" placeholder="Valor R$">
+                    <button onclick="save()" class="col-span-2 bg-pink-600 text-white py-4 rounded font-bold">ENVIAR PROPOSTA</button>
                 </div>
-                <button onclick="saveProposal()" class="mt-4 w-full bg-pink-600 text-white py-4 rounded-xl font-bold">ENVIAR PROPOSTA</button>
-                
-                <h3 class="text-xl font-bold mt-10 mb-4">Comparativo de Propostas</h3>
-                <div class="overflow-x-auto">
-                    <table class="w-full text-left">
-                        <thead class="bg-slate-200"><tr><th class="p-3">Exame</th><th class="p-3">Valor</th><th class="p-3">Data/Hora</th></tr></thead>
-                        <tbody id="proposal-table"></tbody>
-                    </table>
-                </div>
+                <table class="w-full text-left border-collapse">
+                    <tr class="bg-gray-100"><th class="p-3">Exame</th><th class="p-3">Valor</th></tr>
+                    <tbody id="tbl"></tbody>
+                </table>
             </div>
         </main>
-
         <script>
-            function tab(t) {
-                document.getElementById('view-paciente').classList.toggle('hidden', t !== 'paciente');
-                document.getElementById('view-lab').classList.toggle('hidden', t !== 'lab');
-            }
-            async function analyze() {
+            function tab(t){ document.getElementById('paciente').classList.toggle('hidden', t!=='paciente'); document.getElementById('lab').classList.toggle('hidden', t!=='lab'); }
+            async function analyze(){
                 const f = document.getElementById('upload').files[0];
                 const fd = new FormData(); fd.append('file', f);
-                document.getElementById('res-paciente').innerText = "Processando com IA...";
-                document.getElementById('res-paciente').classList.remove('hidden');
+                document.getElementById('res').innerText = "Analisando...";
+                document.getElementById('res').classList.remove('hidden');
                 const r = await fetch('/analyze', {method:'POST', body: fd});
                 const d = await r.json();
-                document.getElementById('res-paciente').innerText = "Exame identificado: " + d.exame;
+                document.getElementById('res').innerText = "Exame Detectado: " + d.exame;
             }
-            async function saveProposal() {
-                const data = {
-                    exame: document.getElementById('lab-exam').value,
-                    valor: document.getElementById('lab-price').value,
-                    data: document.getElementById('lab-date').value + " " + document.getElementById('lab-time').value
-                };
+            async function buscar(){
+                alert("Buscando rede credenciada para seu CEP...");
+            }
+            async function save(){
+                const data = {exame: document.getElementById('l-exame').value, valor: document.getElementById('l-valor').value};
                 await fetch('/save', {method:'POST', body: JSON.stringify(data), headers:{'Content-Type':'application/json'}});
-                updateTable();
+                location.reload();
             }
-            async function updateTable() {
-                const r = await fetch('/proposals');
-                const list = await r.json();
-                const tbody = document.getElementById('proposal-table');
-                tbody.innerHTML = list.map(p => `<tr><td class='p-3 border'>${p.exame}</td><td class='p-3 border'>R$ ${p.valor}</td><td class='p-3 border'>${p.data}</td></tr>`).join('');
-            }
+            fetch('/proposals').then(r=>r.json()).then(l => {
+                document.getElementById('tbl').innerHTML = l.map(p => `<tr><td class="p-3 border">${p.exame}</td><td class="p-3 border">R$ ${p.valor}</td></tr>`).join('');
+            });
         </script>
     </body>
     </html>
@@ -119,10 +102,11 @@ async def home():
 @app.post("/analyze")
 async def analyze(file: UploadFile = File(...)):
     try:
-        img = PIL.Image.open(io.BytesIO(await file.read()))
-        res = model.generate_content(["Identifique apenas o nome do exame no pedido médico.", img])
+        content = await file.read()
+        img = PIL.Image.open(io.BytesIO(content))
+        res = model.generate_content(["Identifique o nome do exame nesta receita. Responda apenas o nome.", img])
         return {"exame": res.text.strip()}
-    except: return {"exame": "Erro na análise"}
+    except: return {"exame": "Erro na IA"}
 
 @app.post("/save")
 async def save(data: dict = Body(...)):
